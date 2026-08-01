@@ -1,9 +1,9 @@
-C(venv) ubuntu@my-apps-servers:~/pickleball-app$ sudo iptables -L INPUT -n --line-numbers
-Chain INPUT (policy ACCEPT)
-num  target     prot opt source               destination
-1    ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
-2    ACCEPT     icmp --  0.0.0.0/0            0.0.0.0/0
-3    ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0
-4    ACCEPT     tcp  --  0.0.0.0/0            0.0.0.0/0            state NEW tcp dpt:22
-5    ACCEPT     tcp  --  0.0.0.0/0            0.0.0.0/0            tcp dpt:5000
-6    REJECT     all  --  0.0.0.0/0            0.0.0.0/0            reject-with icmp-host-prohibited
+ubuntu@my-apps-servers:~$ cd ~/pickleball-app
+ubuntu@my-apps-servers:~/pickleball-app$ source venv/bin/activate
+(venv) ubuntu@my-apps-servers:~/pickleball-app$ python3 app.py
+ * Serving Flask app 'app'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://10.0.0.244:5000
