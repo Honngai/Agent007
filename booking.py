@@ -2,7 +2,7 @@ import sqlite3
 import secrets
 from time import time
 from flask import Flask, request, session, redirect, render_template_string, jsonify
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
@@ -24,7 +24,7 @@ YOUR_PHONE = "916009041427"
 ADMIN_PATH = "court-manager-x9k2"
 DB_PATH = "bookings.db"
 failed_attempts = {}
-BOOKING_WINDOW_DAYS = 7
+BOOKING_WINDOW_DAYS = 7  # total number of selectable days including today
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -508,7 +508,7 @@ GUEST_PAGE = """
         const [y, m, d] = serverToday.split('-').map(Number);
         const today = new Date(y, m - 1, d);
 
-        for (let i = 0; i <= bookingWindowDays; i++) {
+        for (let i = 0; i < bookingWindowDays; i++) {
             const dt = new Date(today);
             dt.setDate(today.getDate() + i);
             const dateStr = toDateStr(dt);
@@ -527,6 +527,12 @@ GUEST_PAGE = """
                 loadSlots();
             });
             row.appendChild(card);
+
+            if (dateStr === currentDate) {
+                requestAnimationFrame(() => {
+                    card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                });
+            }
         }
     }
 
@@ -567,12 +573,12 @@ GUEST_PAGE = """
         }
     }
 
-    // Wire up the calendar icon's native date input
+    // Wire up the calendar icon's native date input (same 7-day window as scroller)
     const calendarPicker = document.getElementById('calendarPicker');
     calendarPicker.min = serverToday;
     const [ty, tm, td] = serverToday.split('-').map(Number);
     const maxD = new Date(ty, tm - 1, td);
-    maxD.setDate(maxD.getDate() + bookingWindowDays);
+    maxD.setDate(maxD.getDate() + (bookingWindowDays - 1));
     calendarPicker.max = toDateStr(maxD);
 
     calendarPicker.addEventListener('change', () => {
@@ -710,9 +716,10 @@ def api_slots():
 
     now = now_ist()
     today_str = now.strftime("%Y-%m-%d")
+    max_date_str = (now.date() + timedelta(days=BOOKING_WINDOW_DAYS - 1)).strftime("%Y-%m-%d")
 
-    # Entire date already in the past -> no slots
-    if date_str < today_str:
+    # Outside the allowed 7-day booking window (past or too far in future)
+    if date_str < today_str or date_str > max_date_str:
         return jsonify({
             "court": court,
             "date": date_str,
@@ -809,7 +816,6 @@ def admin_toggle():
     set_booking(admin_court, date_str, hour, guest_name)
 
     return redirect(f"/{ADMIN_PATH}?date={date_str}")
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
