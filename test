@@ -7,3 +7,14 @@ WARNING: This is a development server. Do not use it in a production deployment.
  * Running on all addresses (0.0.0.0)
  * Running on http://127.0.0.1:5000
  * Running on http://10.0.0.244:5000
+
+
+
+///////in other terminal 
+PS C:\Users\psych> curl http://10.0.0.244:5000
+curl : Unable to connect to the remote server
+At line:1 char:1
++ curl http://10.0.0.244:5000
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (System.Net.HttpWebRequest:HttpWebRequest) [Invoke-WebRequest], WebException
+    + FullyQualifiedErrorId : WebCmdletWebResponseException,Microsoft.PowerShell.Commands.InvokeWebRequestCommand
