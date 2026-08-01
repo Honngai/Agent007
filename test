@@ -1,20 +1,98 @@
-ubuntu@my-apps-servers:~$ cd ~/pickleball-app
-ubuntu@my-apps-servers:~/pickleball-app$ source venv/bin/activate
-(venv) ubuntu@my-apps-servers:~/pickleball-app$ python3 app.py
- * Serving Flask app 'app'
- * Debug mode: off
-WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
- * Running on all addresses (0.0.0.0)
- * Running on http://127.0.0.1:5000
- * Running on http://10.0.0.244:5000
+Complete Summary — Everything We're Working On 📋
+The Goal
+Set up a free Oracle Cloud VM server to host a Flask-based pickleball court booking app, so it's fast/reliable (better than PythonAnywhere's UK/US latency for India).
+
+What's Been Done So Far
+1. Oracle Cloud Account & Instance
+Region: India West (Mumbai)
+Instance name: my-apps-servers
+Shape: Available Ampere/Micro shape (whichever succeeded — likely VM.Standard.E2.1.Micro since A1.Flex kept hitting "out of capacity")
+OS: Ubuntu 22.04.5 LTS
+Public IP: 92.4.74.73 (Ephemeral)
+Private IP: 10.0.0.244
+2. SSH Key
+Private key file location: C:\Users\psych\OneDrive\Documents\ssh\ssh-key-2026-08-01.key
+SSH command that WORKS to connect:
+
+graphql
+
+Copy code
+ssh -i "C:\Users\psych\OneDrive\Documents\ssh\ssh-key-2026-08-01.key" ubuntu@92.4.74.73
+
+3. Networking Fixes Already Applied
+Oracle Security List (VCN → vcn-20260801-2314 → Default Security List): Added ingress rules for:
+Port 22 (SSH) ✅
+Port 5000 (Flask) ✅
+Internet Gateway: Created (was missing initially, this was blocking ALL initial SSH attempts)
+Route Table: Added route 0.0.0.0/0 → Internet Gateway (also was missing, fixed alongside Internet Gateway issue)
+Ubuntu's internal iptables firewall: Added rule to allow port 5000:
+
+css
+
+Copy code
+sudo iptables -I INPUT 5 -p tcp --dport 5000 -j ACCEPT
+sudo netfilter-persistent save
+
+Confirmed via sudo iptables -L INPUT -n --line-numbers that port 5000 rule exists correctly, positioned BEFORE the REJECT rule.
+
+4. Server Software Installed
+
+bash
+
+Copy code
+sudo apt update && sudo apt upgrade -y
+sudo apt install python3 python3-pip python3-venv -y
+mkdir ~/pickleball-app
+cd ~/pickleball-app
+python3 -m venv venv
+source venv/bin/activate
+pip install flask gunicorn
+
+5. App File Created
+File: ~/pickleball-app/app.py
+Contains the full pickleball booking Flask app (dark theme, 3 courts, date scroller, WhatsApp booking buttons, admin panel with per-court passwords: Chara1/Chara2/Chara3, admin secret path /court-manager-x9k2)
+Confirmed Flask runs successfully when executed:
+
+bash
+
+Copy code
+python3 app.py
+
+Output confirmed:
 
 
+csharp
 
-///////in other terminal 
-PS C:\Users\psych> curl http://10.0.0.244:5000
-curl : Unable to connect to the remote server
-At line:1 char:1
-+ curl http://10.0.0.244:5000
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (System.Net.HttpWebRequest:HttpWebRequest) [Invoke-WebRequest], WebException
-    + FullyQualifiedErrorId : WebCmdletWebResponseException,Microsoft.PowerShell.Commands.InvokeWebRequestCommand
+Copy code
+* Running on http://127.0.0.1:5000
+* Running on http://10.0.0.244:5000
+
+THE CURRENT UNRESOLVED PROBLEM
+Despite Flask running correctly on the server, and all firewall rules (Oracle Security List + Ubuntu iptables) appearing correct, the app is still NOT reachable from outside (tested via browser and curl from Windows PC using the public IP 92.4.74.73:5000).
+
+Tests Already Tried That Failed:
+curl http://92.4.74.73:5000 from Windows PowerShell → failed/unreachable
+Browser visit to http://92.4.74.73:5000 → page not reachable
+Tried both home WiFi AND mobile hotspot — same failure on both networks (rules out simple ISP blocking)
+Test In Progress (Incomplete Info)
+Ran Test-NetConnection -ComputerName 92.4.74.73 -Port 5000 — only got partial output "0ms", need the FULL output including TcpTestSucceeded field to know if it's True/False
+What Still Needs To Be Verified/Done Next
+Get the complete Test-NetConnection output (specifically the TcpTestSucceeded: True/False line) — this is the most direct way to know if port 5000 is truly reachable from outside
+Double check Oracle NSG (Network Security Group) — earlier we saw "-" (none attached) on the VNIC, but worth re-confirming nothing changed
+Confirm Flask is STILL actively running in the SSH session (the terminal showing "Running on..." must stay open/active — if that SSH session was closed, Flask stops too)
+Possible next diagnostic: From the SSH session itself, run curl http://localhost:5000 to confirm Flask responds locally on the server (isolates server-side vs network-side issue)
+Consider: Ephemeral public IPs on Oracle can sometimes have propagation delay after Internet Gateway/Route Table changes — worth trying again after waiting a few minutes, or even rebooting the instance once all networking is confirmed correct
+Key File/Path Reference Sheet
+Item	Value
+Public IP	92.4.74.73
+Private IP	10.0.0.244
+SSH key path	C:\Users\psych\OneDrive\Documents\ssh\ssh-key-2026-08-01.key
+SSH username	ubuntu
+App folder on server	~/pickleball-app
+App file	~/pickleball-app/app.py
+Virtual env activate	source venv/bin/activate
+Flask run command	python3 app.py
+Flask port	5000
+VCN name	vcn-20260801-2314
+Admin secret path (in-app)	/court-manager-x9k2
+Admin passwords (per court)	Chara1, Chara2, Chara3
