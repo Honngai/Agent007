@@ -24,7 +24,7 @@ YOUR_PHONE = "916009041427"
 ADMIN_PATH = "court-manager-x9k2"
 DB_PATH = "bookings.db"
 failed_attempts = {}
-BOOKING_WINDOW_DAYS = 7  # total number of selectable days including today
+BOOKING_WINDOW_DAYS = 14  # total selectable days including today (keep as a multiple of 7 for clean paging)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -231,7 +231,29 @@ BASE_STYLE = """
 
     /* Date Scroller */
     .date-scroll-section { margin: 0 0 22px; }
-    .date-scroll-label { font-size: 15px; font-weight: 700; color: #fff; padding: 0 20px 12px; }
+    .date-scroll-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 20px 12px;
+        gap: 10px;
+    }
+    .date-scroll-label { font-size: 15px; font-weight: 700; color: #fff; }
+    .date-scroll-nav { display: flex; gap: 8px; flex-shrink: 0; }
+    .week-nav-btn {
+        background: #17171d;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 7px 14px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .week-nav-btn.next { background: #ec4899; }
+    .week-nav-btn:disabled { opacity: 0.3; cursor: default; }
+
     .date-scroll-row {
         display: flex;
         align-items: center;
@@ -456,7 +478,13 @@ GUEST_PAGE = """
     </div>
 
     <div class="date-scroll-section">
-        <div class="date-scroll-label">Select Date</div>
+        <div class="date-scroll-header">
+            <div class="date-scroll-label">Select Date</div>
+            <div class="date-scroll-nav">
+                <button type="button" id="prevWeekBtn" class="week-nav-btn">&lsaquo; Prev</button>
+                <button type="button" id="nextWeekBtn" class="week-nav-btn next">Next &rsaquo;</button>
+            </div>
+        </div>
         <div class="date-scroll-row" id="dateScrollRow"></div>
     </div>
 
@@ -487,13 +515,13 @@ GUEST_PAGE = """
     const bookingWindowDays = {{ booking_window }};
     const serverToday = "{{ today }}"; // IST date from server, authoritative
     let currentDate = "{{ selected_date }}";
+    let pageOffset = 0; // how many days ahead of serverToday the current page of 7 cards starts
 
     function waMessage(court, dateStr, hourLabel) {
         const msg = `Hi! I'd like to book ${court} on ${dateStr} at ${hourLabel}. Please confirm availability.`;
         return encodeURIComponent(msg);
     }
 
-    // Timezone-safe formatter (avoids UTC conversion / off-by-one day bugs)
     function toDateStr(d) {
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -501,16 +529,35 @@ GUEST_PAGE = """
         return `${yyyy}-${mm}-${dd}`;
     }
 
+    function getServerTodayDate() {
+        const [y, m, d] = serverToday.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+
+    function diffDaysFromToday(dateStr) {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        const target = new Date(y, m - 1, d);
+        const today = getServerTodayDate();
+        return Math.round((target - today) / 86400000);
+    }
+
+    function clampPageOffset(offset) {
+        const maxOffset = Math.max(0, Math.floor((bookingWindowDays - 1) / 7) * 7);
+        return Math.min(Math.max(offset, 0), maxOffset);
+    }
+
     function buildDateCards() {
         const row = document.getElementById('dateScrollRow');
         row.innerHTML = '';
 
-        const [y, m, d] = serverToday.split('-').map(Number);
-        const today = new Date(y, m - 1, d);
+        const today = getServerTodayDate();
 
-        for (let i = 0; i < bookingWindowDays; i++) {
+        for (let i = 0; i < 7; i++) {
+            const dayNum = pageOffset + i;
+            if (dayNum > bookingWindowDays - 1) break;
+
             const dt = new Date(today);
-            dt.setDate(today.getDate() + i);
+            dt.setDate(today.getDate() + dayNum);
             const dateStr = toDateStr(dt);
 
             const card = document.createElement('button');
@@ -527,13 +574,16 @@ GUEST_PAGE = """
                 loadSlots();
             });
             row.appendChild(card);
-
-            if (dateStr === currentDate) {
-                requestAnimationFrame(() => {
-                    card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-                });
-            }
         }
+
+        updateNavButtons();
+    }
+
+    function updateNavButtons() {
+        const prevBtn = document.getElementById('prevWeekBtn');
+        const nextBtn = document.getElementById('nextWeekBtn');
+        prevBtn.disabled = pageOffset <= 0;
+        nextBtn.disabled = pageOffset + 7 > bookingWindowDays - 1;
     }
 
     async function loadSlots() {
@@ -573,22 +623,47 @@ GUEST_PAGE = """
         }
     }
 
-    // Wire up the calendar icon's native date input (same 7-day window as scroller)
+    document.getElementById('prevWeekBtn').addEventListener('click', () => {
+        pageOffset = clampPageOffset(pageOffset - 7);
+        const today = getServerTodayDate();
+        const dt = new Date(today);
+        dt.setDate(today.getDate() + pageOffset);
+        currentDate = toDateStr(dt);
+        document.getElementById('calendarPicker').value = currentDate;
+        buildDateCards();
+        loadSlots();
+    });
+
+    document.getElementById('nextWeekBtn').addEventListener('click', () => {
+        pageOffset = clampPageOffset(pageOffset + 7);
+        const today = getServerTodayDate();
+        const dt = new Date(today);
+        dt.setDate(today.getDate() + pageOffset);
+        currentDate = toDateStr(dt);
+        document.getElementById('calendarPicker').value = currentDate;
+        buildDateCards();
+        loadSlots();
+    });
+
+    // Calendar icon picker — jump straight to any date within the window
     const calendarPicker = document.getElementById('calendarPicker');
     calendarPicker.min = serverToday;
-    const [ty, tm, td] = serverToday.split('-').map(Number);
-    const maxD = new Date(ty, tm - 1, td);
+    const maxD = getServerTodayDate();
     maxD.setDate(maxD.getDate() + (bookingWindowDays - 1));
     calendarPicker.max = toDateStr(maxD);
 
     calendarPicker.addEventListener('change', () => {
         if (calendarPicker.value) {
             currentDate = calendarPicker.value;
+            const diff = diffDaysFromToday(currentDate);
+            pageOffset = clampPageOffset(Math.floor(diff / 7) * 7);
             buildDateCards();
             loadSlots();
         }
     });
 
+    // Initialize page based on the initially selected date
+    pageOffset = clampPageOffset(Math.floor(diffDaysFromToday(currentDate) / 7) * 7);
     buildDateCards();
     loadSlots();
 </script>
@@ -718,7 +793,7 @@ def api_slots():
     today_str = now.strftime("%Y-%m-%d")
     max_date_str = (now.date() + timedelta(days=BOOKING_WINDOW_DAYS - 1)).strftime("%Y-%m-%d")
 
-    # Outside the allowed 7-day booking window (past or too far in future)
+    # Outside the allowed booking window (past or too far in future)
     if date_str < today_str or date_str > max_date_str:
         return jsonify({
             "court": court,
@@ -816,6 +891,7 @@ def admin_toggle():
     set_booking(admin_court, date_str, hour, guest_name)
 
     return redirect(f"/{ADMIN_PATH}?date={date_str}")
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
