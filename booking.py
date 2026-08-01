@@ -3,6 +3,7 @@ import secrets
 from time import time
 from flask import Flask, request, session, redirect, render_template_string, jsonify
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
@@ -24,6 +25,12 @@ ADMIN_PATH = "court-manager-x9k2"
 DB_PATH = "bookings.db"
 failed_attempts = {}
 BOOKING_WINDOW_DAYS = 7
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def now_ist():
+    return datetime.now(IST)
 
 
 def init_db():
@@ -413,7 +420,12 @@ GUEST_PAGE = """
     <div class="detail-topbar">
         <a class="back-btn" href="/">&larr; Back to Courts</a>
         <span class="detail-court-title">{{ selected_court }}</span>
-        <span class="calendar-icon-btn">📅</span>
+        <label class="calendar-icon-btn" style="position:relative; cursor:pointer;">
+            📅
+            <input type="date" id="calendarPicker"
+                   style="position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer;"
+                   value="{{ selected_date }}">
+        </label>
     </div>
 
     <div class="court-info-card">
@@ -473,6 +485,7 @@ GUEST_PAGE = """
     const phone = "{{ phone }}";
     const currentCourt = "{{ selected_court }}";
     const bookingWindowDays = {{ booking_window }};
+    const serverToday = "{{ today }}"; // IST date from server, authoritative
     let currentDate = "{{ selected_date }}";
 
     function waMessage(court, dateStr, hourLabel) {
@@ -480,30 +493,36 @@ GUEST_PAGE = """
         return encodeURIComponent(msg);
     }
 
+    // Timezone-safe formatter (avoids UTC conversion / off-by-one day bugs)
     function toDateStr(d) {
-        return d.toISOString().split('T')[0];
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
     }
 
     function buildDateCards() {
         const row = document.getElementById('dateScrollRow');
         row.innerHTML = '';
-        const today = new Date();
-        today.setHours(0,0,0,0);
+
+        const [y, m, d] = serverToday.split('-').map(Number);
+        const today = new Date(y, m - 1, d);
 
         for (let i = 0; i <= bookingWindowDays; i++) {
-            const d = new Date(today);
-            d.setDate(today.getDate() + i);
-            const dateStr = toDateStr(d);
+            const dt = new Date(today);
+            dt.setDate(today.getDate() + i);
+            const dateStr = toDateStr(dt);
 
             const card = document.createElement('button');
             card.className = 'day-card' + (dateStr === currentDate ? ' active' : '');
             card.innerHTML = `
-                <span class="day-name">${d.toLocaleDateString('en-US', {weekday: 'short'})}</span>
-                <span class="day-num">${d.getDate().toString().padStart(2,'0')}</span>
-                <span class="day-month">${d.toLocaleDateString('en-US', {month: 'short'})}</span>
+                <span class="day-name">${dt.toLocaleDateString('en-US', {weekday: 'short'})}</span>
+                <span class="day-num">${dt.getDate().toString().padStart(2,'0')}</span>
+                <span class="day-month">${dt.toLocaleDateString('en-US', {month: 'short'})}</span>
             `;
             card.addEventListener('click', () => {
                 currentDate = dateStr;
+                document.getElementById('calendarPicker').value = dateStr;
                 buildDateCards();
                 loadSlots();
             });
@@ -518,6 +537,11 @@ GUEST_PAGE = """
         try {
             const res = await fetch(`/api/slots?court=${encodeURIComponent(currentCourt)}&date=${currentDate}`);
             const data = await res.json();
+
+            if (!data.slots || data.slots.length === 0) {
+                container.innerHTML = '<div class="loading-spinner">No slots available for this date.</div>';
+                return;
+            }
 
             let html = '';
             data.slots.forEach(slot => {
@@ -542,6 +566,22 @@ GUEST_PAGE = """
             container.innerHTML = '<div class="loading-spinner">Error loading slots.</div>';
         }
     }
+
+    // Wire up the calendar icon's native date input
+    const calendarPicker = document.getElementById('calendarPicker');
+    calendarPicker.min = serverToday;
+    const [ty, tm, td] = serverToday.split('-').map(Number);
+    const maxD = new Date(ty, tm - 1, td);
+    maxD.setDate(maxD.getDate() + bookingWindowDays);
+    calendarPicker.max = toDateStr(maxD);
+
+    calendarPicker.addEventListener('change', () => {
+        if (calendarPicker.value) {
+            currentDate = calendarPicker.value;
+            buildDateCards();
+            loadSlots();
+        }
+    });
 
     buildDateCards();
     loadSlots();
@@ -644,7 +684,8 @@ def guest_view():
     if selected_court not in COURTS:
         selected_court = court_list[0]
 
-    selected_date = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
+    today_ist = now_ist().strftime("%Y-%m-%d")
+    selected_date = request.args.get("date") or today_ist
 
     return render_template_string(
         GUEST_PAGE,
@@ -652,7 +693,7 @@ def guest_view():
         courts=court_list,
         selected_court=selected_court,
         selected_date=selected_date,
-        today=datetime.now().strftime("%Y-%m-%d"),
+        today=today_ist,
         phone=YOUR_PHONE,
         booking_window=BOOKING_WINDOW_DAYS,
         court_image=COURT_IMAGES.get(selected_court, "court1.jpg"),
@@ -667,10 +708,25 @@ def api_slots():
     if court not in COURTS:
         return jsonify({"error": "Invalid court"}), 400
 
+    now = now_ist()
+    today_str = now.strftime("%Y-%m-%d")
+
+    # Entire date already in the past -> no slots
+    if date_str < today_str:
+        return jsonify({
+            "court": court,
+            "date": date_str,
+            "nice_date": format_date_nice(date_str),
+            "slots": []
+        })
+
     bookings = get_bookings(court, date_str)
 
     slots = []
     for hour in HOURS:
+        # If it's today (IST), skip hours that have already started/passed
+        if date_str == today_str and hour < now.hour:
+            continue
         slots.append({
             "hour": hour,
             "time_label": f"{format_hour(hour)} – {format_hour(hour+1)}",
@@ -691,7 +747,7 @@ def admin_view():
     if not admin_court or admin_court not in COURTS:
         return render_template_string(ADMIN_LOGIN_PAGE, style=BASE_STYLE, courts=list(COURTS.keys()), error=None)
 
-    selected_date = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
+    selected_date = request.args.get("date") or now_ist().strftime("%Y-%m-%d")
     bookings = get_bookings(admin_court, selected_date)
 
     return render_template_string(
@@ -753,3 +809,7 @@ def admin_toggle():
     set_booking(admin_court, date_str, hour, guest_name)
 
     return redirect(f"/{ADMIN_PATH}?date={date_str}")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
