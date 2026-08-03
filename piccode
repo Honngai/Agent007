@@ -1,0 +1,1 @@
+scp -i "C:\Users\psych\OneDrive\Documents\ssh\ssh-key-2026-08-01.key" "C:\path\to\hero-banner.jpg" ubuntu@92.4.74.73:~/pickleball-app/static/
