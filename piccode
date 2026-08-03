@@ -1,1 +1,10 @@
-scp -i "C:\Users\psych\OneDrive\Documents\ssh\ssh-key-2026-08-01.key" "C:\path\to\hero-banner.jpg" ubuntu@92.4.74.73:~/pickleball-app/static/
+server {
+    listen 80;
+    server_name chara-pickleball.duckdns.org;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
